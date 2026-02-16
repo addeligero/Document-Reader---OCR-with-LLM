@@ -12,6 +12,7 @@ from PIL import Image
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 from flask_cors import CORS
 from docx import Document
+import torch
 
 # ===============================
 # Initialize Flask
@@ -32,9 +33,13 @@ def allowed_file(filename):
 # ===============================
 # Load TrOCR Model (Load once!)
 # ===============================
+device = torch.device("cpu")
+
 processor = TrOCRProcessor.from_pretrained("microsoft/trocr-large-printed")
 model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-large-printed")
 
+model.to(device)
+model.eval()
 # ===============================
 # OCR Preprocessing Function
 # ===============================
@@ -68,8 +73,11 @@ def ocr_image(img):
         rgb = cv2.cvtColor(line_img, cv2.COLOR_GRAY2RGB)
         pil_img = Image.fromarray(rgb)
 
-        pixel_values = processor(images=pil_img, return_tensors="pt").pixel_values
-        generated_ids = model.generate(pixel_values)
+        pixel_values = processor(images=pil_img, return_tensors="pt").pixel_values.to(device)
+
+        with torch.no_grad():
+          generated_ids = model.generate(pixel_values)
+
         text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
 
         extracted_lines.append(text)
