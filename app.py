@@ -72,15 +72,28 @@ def detect_text_lines(cropped):
         cv2.THRESH_BINARY_INV, block_size, 10
     )
 
+    # Remove long vertical/horizontal ruling lines (common in scanned table PDFs)
+    # so bounding boxes are formed from text components rather than table borders.
+    line_scale = max(20, min(h, w) // 30)
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, line_scale))
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (line_scale, 1))
+    vertical_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, vertical_kernel)
+    horizontal_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, horizontal_kernel)
+    text_only = cv2.subtract(thresh, cv2.bitwise_or(vertical_lines, horizontal_lines))
+
+    # Connect letters inside each row without aggressively merging nearby rows.
+    connect_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(8, w // 140), 1))
+    text_for_projection = cv2.morphologyEx(text_only, cv2.MORPH_CLOSE, connect_kernel)
+
     # Horizontal projection: count white pixels per row
-    proj = np.sum(thresh, axis=1) / 255
+    proj = np.sum(text_for_projection, axis=1) / 255
 
     # Row has text if white pixel count exceeds threshold
-    text_threshold = w * 0.005
+    text_threshold = w * 0.003
     text_rows = proj > text_threshold
 
     # Merge small vertical gaps between lines (e.g. space between baseline and next ascender)
-    gap_merge = max(5, h // 200)
+    gap_merge = max(2, h // 350)
     text_mask = text_rows.astype(np.uint8)
     merge_kernel = np.ones(gap_merge, np.uint8)
     text_mask = cv2.dilate(text_mask.reshape(-1, 1), merge_kernel).flatten()
@@ -101,7 +114,7 @@ def detect_text_lines(cropped):
             continue
 
         # Find horizontal extent of text in this row
-        line_strip = thresh[s:e, :]
+        line_strip = text_for_projection[s:e, :]
         col_proj = np.sum(line_strip, axis=0) / 255
         cols_with_text = np.where(col_proj > 0)[0]
         if len(cols_with_text) == 0:
@@ -122,7 +135,7 @@ def detect_text_lines(cropped):
         x2 = min(w, x_end + pad_x)
         boxes.append((x1, y1, x2 - x1, y2 - y1))
 
-    return boxes, thresh
+    return boxes, thresh, text_for_projection
 
 
 def ocr_image(img, filename="image", is_pdf=False):
@@ -153,9 +166,12 @@ def ocr_image(img, filename="image", is_pdf=False):
     cv2.imwrite(os.path.join(process_folder, "03_cropped.png"), cropped)
 
     # Detect text lines using adaptive threshold + horizontal projection
-    boxes, thresh = detect_text_lines(cropped)
+    boxes, thresh, text_projection = detect_text_lines(cropped)
     cv2.imwrite(os.path.join(process_folder, "04_threshold.png"), thresh)
 
+    # Optionally save text projection image based on debug/config flag to reduce disk usage
+    if os.getenv("OCR_SAVE_TEXT_PROJECTION", "0") == "1":
+        cv2.imwrite(os.path.join(process_folder, "05_text_projection.png"), text_projection)
     bbox_img = cv2.cvtColor(cropped.copy(), cv2.COLOR_GRAY2BGR)
 
     extracted_lines = []
@@ -253,11 +269,11 @@ def upload_file():
                 img = np.array(page)
                 img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
-            extracted_text += ocr_image(
-                img,
-                f"{filename}_page{page_num}",
-                is_pdf=True
-            ) + "\n"
+                extracted_text += ocr_image(
+                    img,
+                    f"{filename}_page{page_num}",
+                    is_pdf=True
+                ) + "\n"
 
             return jsonify({
                 "type": "scanned-pdf",
