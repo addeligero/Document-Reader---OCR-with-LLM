@@ -352,44 +352,51 @@ def upload_file():
     # PDF
     # ===============================
     if ext == "pdf":
-        # 1) Try text-based extraction first
         try:
+            final_text_parts = []
+
+            # Open PDF once
             with pdfplumber.open(filepath) as pdf:
-                for page in pdf.pages:
-                    text = page.extract_text()
-                    if text:
-                        extracted_text += text + "\n"
+                total_pages = len(pdf.pages)
 
-            if extracted_text.strip():
-                return jsonify({"type": "text-based-pdf", "text": extracted_text})
-
-        except Exception as e:
-            print("pdfplumber error:", e)
-
-        # 2) Scanned PDF -> render pages -> OCR each page (FIXED LOOP)
-        try:
-            pages = convert_from_path(
-                filepath,
-                dpi=400,
-                poppler_path=POPPLER_PATH,
-            )
-
-            extracted_text = ""
-            for page_num, page in enumerate(pages, 1):
-                if page.mode != "RGB":
-                    page = page.convert("RGB")
-                img = np.array(page)
-                img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-
-                extracted_text += (
-                    ocr_image(img, f"{filename}_page{page_num}", is_pdf=True) + "\n"
+                # Render all pages once (only used when a page needs OCR)
+                # If you want faster: we can render lazily per missing page
+                rendered_pages = convert_from_path(
+                    filepath,
+                    dpi=400,
+                    poppler_path=POPPLER_PATH
                 )
 
-            return jsonify({"type": "scanned-pdf", "text": extracted_text})
+                for i, page in enumerate(pdf.pages):
+                    page_num = i + 1
+
+                    # 1) Try text-based extraction
+                    text = page.extract_text() or ""
+                    text = text.strip()
+
+                    if text:
+                        final_text_parts.append(f"--- Page {page_num}/{total_pages} (text) ---\n{text}\n")
+                        continue
+
+                    # 2) If no text, do OCR on the rendered image page
+                    img = rendered_pages[i]
+                    if img.mode != "RGB":
+                        img = img.convert("RGB")
+                    img_np = np.array(img)
+                    img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+
+                    ocr_txt = ocr_image(img_bgr, f"{filename}_page{page_num}", is_pdf=True).strip()
+                    final_text_parts.append(f"--- Page {page_num}/{total_pages} (ocr) ---\n{ocr_txt}\n")
+
+            return jsonify({
+                "type": "hybrid-pdf",
+                "text": "\n".join(final_text_parts)
+            })
 
         except Exception as e:
-            print("PDF OCR error:", e)
-            return jsonify({"error": "Failed to process scanned PDF"}), 500
+            print("PDF processing error:", e)
+            return jsonify({"error": "Failed to process PDF"}), 500
+
 
     # ===============================
     # DOCX
