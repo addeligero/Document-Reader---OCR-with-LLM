@@ -168,8 +168,10 @@ def ocr_image(img, filename="image", is_pdf=False):
     # Detect text lines using adaptive threshold + horizontal projection
     boxes, thresh, text_projection = detect_text_lines(cropped)
     cv2.imwrite(os.path.join(process_folder, "04_threshold.png"), thresh)
-    cv2.imwrite(os.path.join(process_folder, "05_text_projection.png"), text_projection)
 
+    # Optionally save text projection image based on debug/config flag to reduce disk usage
+    if os.getenv("OCR_SAVE_TEXT_PROJECTION", "0") == "1":
+        cv2.imwrite(os.path.join(process_folder, "05_text_projection.png"), text_projection)
     bbox_img = cv2.cvtColor(cropped.copy(), cv2.COLOR_GRAY2BGR)
 
     extracted_lines = []
