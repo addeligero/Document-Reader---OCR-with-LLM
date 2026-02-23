@@ -2,3 +2,4 @@ venv
 uploads
 process
 user-ocr-process
+.env*
