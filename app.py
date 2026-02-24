@@ -16,6 +16,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from docx import Document
 from services.ocr_process import ocr_image
+from services.llm_process import classify_document
 
 # ===============================
 # Initialize Flask
@@ -110,9 +111,15 @@ def upload_file():
                         f"--- Page {page_num}/{total_pages} (ocr) ---\n{ocr_txt}\n"
                     )
 
+            full_text = "\n".join(final_text_parts)
+            llm_result = classify_document(full_text)
+
             return jsonify({
                 "type": "hybrid-pdf-lazy",
-                "text": "\n".join(final_text_parts)
+                "text": full_text,
+                "primary_category": llm_result.get("primary_category"),
+                "secondary_category": llm_result.get("secondary_category"),
+                "tags": llm_result.get("tags", []),
             })
 
         except Exception as e:
@@ -128,7 +135,15 @@ def upload_file():
             for para in doc.paragraphs:
                 extracted_text += para.text + "\n"
 
-            return jsonify({"type": "docx", "text": extracted_text})
+            llm_result = classify_document(extracted_text)
+
+            return jsonify({
+                "type": "docx",
+                "text": extracted_text,
+                "primary_category": llm_result.get("primary_category"),
+                "secondary_category": llm_result.get("secondary_category"),
+                "tags": llm_result.get("tags", []),
+            })
 
         except Exception as e:
             print("DOCX error:", e)
@@ -144,8 +159,15 @@ def upload_file():
                 return jsonify({"error": "Invalid image file"}), 400
 
             extracted_text = ocr_image(img, filename, is_pdf=False)
+            llm_result = classify_document(extracted_text)
 
-            return jsonify({"type": "image", "text": extracted_text})
+            return jsonify({
+                "type": "image",
+                "text": extracted_text,
+                "primary_category": llm_result.get("primary_category"),
+                "secondary_category": llm_result.get("secondary_category"),
+                "tags": llm_result.get("tags", []),
+            })
 
         except Exception as e:
             print("Image OCR error:", e)
