@@ -6,6 +6,7 @@ from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 import torch
 from datetime import datetime
 
+print("Loading TrOCR model...")
 # ===============================
 # OCR Process Folder
 # ===============================

@@ -138,6 +138,7 @@ def upload_file():
             llm_result = classify_document(extracted_text)
 
             return jsonify({
+                "filename": filename,
                 "type": "docx",
                 "text": extracted_text,
                 "primary_category": llm_result.get("primary_category"),
@@ -162,6 +163,7 @@ def upload_file():
             llm_result = classify_document(extracted_text)
 
             return jsonify({
+                "filename": filename,
                 "type": "image",
                 "text": extracted_text,
                 "primary_category": llm_result.get("primary_category"),
