@@ -115,7 +115,7 @@ def upload_file():
             llm_result = classify_document(full_text)
 
             return jsonify({
-                "type": "hybrid-pdf-lazy",
+                "filename": filename,
                 "text": full_text,
                 "primary_category": llm_result.get("primary_category"),
                 "secondary_category": llm_result.get("secondary_category"),
