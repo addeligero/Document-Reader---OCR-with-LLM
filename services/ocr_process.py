@@ -16,7 +16,7 @@ os.makedirs(OCR_PROCESS_FOLDER, exist_ok=True)
 # ===============================
 # Load TrOCR Model (Load once)
 # ===============================
-device = torch.device("cpu")  # change to "cuda" if you want & have GPU
+device = torch.device("cuda")  # change to "cuda" if you want & have GPU
 processor = TrOCRProcessor.from_pretrained("microsoft/trocr-large-printed")
 model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-large-printed")
 model.to(device)
