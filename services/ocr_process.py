@@ -4,14 +4,13 @@ import numpy as np
 from PIL import Image
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 import torch
-from datetime import datetime
 
 print("Loading TrOCR model...")
 # ===============================
 # OCR Process Folder
 # ===============================
-OCR_PROCESS_FOLDER = "user-ocr-process"
-os.makedirs(OCR_PROCESS_FOLDER, exist_ok=True)
+# OCR_PROCESS_FOLDER = "user-ocr-process"
+# os.makedirs(OCR_PROCESS_FOLDER, exist_ok=True)
 
 # ===============================
 # Load TrOCR Model (Load once)
@@ -205,16 +204,16 @@ def ocr_image(img_bgr: np.ndarray, filename="image", is_pdf=False) -> str:
         scale = 2200 / img_bgr.shape[0]
         img_bgr = cv2.resize(img_bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    process_name = f"{filename}_{timestamp}"
-    process_folder = os.path.join(OCR_PROCESS_FOLDER, process_name)
-    os.makedirs(process_folder, exist_ok=True)
-
-    cv2.imwrite(os.path.join(process_folder, "01_original.png"), img_bgr)
+    # Disk debug output disabled to avoid filling local storage.
+    # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    # process_name = f"{filename}_{timestamp}"
+    # process_folder = os.path.join(OCR_PROCESS_FOLDER, process_name)
+    # os.makedirs(process_folder, exist_ok=True)
+    # cv2.imwrite(os.path.join(process_folder, "01_original.png"), img_bgr)
 
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     gray = deskew(gray)
-    cv2.imwrite(os.path.join(process_folder, "02_grayscale_deskew.png"), gray)
+    # cv2.imwrite(os.path.join(process_folder, "02_grayscale_deskew.png"), gray)
 
     # Light border crop for photos (keeps PDF pages intact)
     h, w = gray.shape
@@ -224,14 +223,14 @@ def ocr_image(img_bgr: np.ndarray, filename="image", is_pdf=False) -> str:
         pad = 25
         cropped = gray[pad : max(pad + 1, h - pad), pad : max(pad + 1, w - pad)]
 
-    cv2.imwrite(os.path.join(process_folder, "03_cropped.png"), cropped)
+    # cv2.imwrite(os.path.join(process_folder, "03_cropped.png"), cropped)
 
     bin_inv = make_binary_inv(cropped)
-    cv2.imwrite(os.path.join(process_folder, "04_threshold_bin_inv.png"), bin_inv)
+    # cv2.imwrite(os.path.join(process_folder, "04_threshold_bin_inv.png"), bin_inv)
 
     text_only, lines_mask = remove_table_lines(bin_inv)
-    cv2.imwrite(os.path.join(process_folder, "05_lines_mask.png"), lines_mask)
-    cv2.imwrite(os.path.join(process_folder, "06_text_only.png"), text_only)
+    # cv2.imwrite(os.path.join(process_folder, "05_lines_mask.png"), lines_mask)
+    # cv2.imwrite(os.path.join(process_folder, "06_text_only.png"), text_only)
 
     # Detect line boxes
     boxes = detect_text_lines_cc(text_only)
@@ -260,7 +259,7 @@ def ocr_image(img_bgr: np.ndarray, filename="image", is_pdf=False) -> str:
         line_img = cv2.resize(line_img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
         line_img = cv2.GaussianBlur(line_img, (3, 3), 0)
 
-        cv2.imwrite(os.path.join(process_folder, f"line_{idx:03d}.png"), line_img)
+        # cv2.imwrite(os.path.join(process_folder, f"line_{idx:03d}.png"), line_img)
 
         rgb = cv2.cvtColor(line_img, cv2.COLOR_GRAY2RGB)
         pil_img = Image.fromarray(rgb)
@@ -284,11 +283,10 @@ def ocr_image(img_bgr: np.ndarray, filename="image", is_pdf=False) -> str:
         extracted_lines.append(text)
         line_details.append(f"Line {idx}: [{x}, {y}, {bw}, {bh}] -> {text}")
 
-    cv2.imwrite(os.path.join(process_folder, "07_bounding_boxes.png"), bbox_img)
-
-    with open(os.path.join(process_folder, "ocr_results.txt"), "w", encoding="utf-8") as f:
-        f.write("\n".join(line_details))
-        f.write("\n\nFinal Extracted Text:\n")
-        f.write("\n".join(extracted_lines))
+    # cv2.imwrite(os.path.join(process_folder, "07_bounding_boxes.png"), bbox_img)
+    # with open(os.path.join(process_folder, "ocr_results.txt"), "w", encoding="utf-8") as f:
+    #     f.write("\n".join(line_details))
+    #     f.write("\n\nFinal Extracted Text:\n")
+    #     f.write("\n".join(extracted_lines))
 
     return "\n".join(extracted_lines)

@@ -8,10 +8,11 @@
 # ===============================
 
 import os
+import io
 import cv2
 import numpy as np
 import pdfplumber
-from pdf2image import convert_from_path
+from pdf2image import convert_from_bytes
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from docx import Document
@@ -24,9 +25,8 @@ from services.llm_process import classify_document
 app = Flask(__name__)
 CORS(app)
 
-UPLOAD_FOLDER = "uploads"
-
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# UPLOAD_FOLDER = "uploads"
+# os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ===============================
 # Poppler (Windows)
@@ -58,8 +58,9 @@ def upload_file():
     if not filename or not allowed_file(filename):
         return jsonify({"error": "File type not allowed"}), 400
 
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(filepath)
+    uploaded_bytes = file.read()
+    if not uploaded_bytes:
+        return jsonify({"error": "Uploaded file is empty"}), 400
 
     extracted_text = ""
     ext = filename.lower().rsplit(".", 1)[1]
@@ -71,7 +72,7 @@ def upload_file():
         try:
             final_text_parts = []
 
-            with pdfplumber.open(filepath) as pdf:
+            with pdfplumber.open(io.BytesIO(uploaded_bytes)) as pdf:
                 total_pages = len(pdf.pages)
 
                 for i, page in enumerate(pdf.pages):
@@ -87,8 +88,8 @@ def upload_file():
                         continue
 
                     # 2) Lazy rendering: render ONLY this page (because it needs OCR)
-                    img = convert_from_path(
-                        filepath,
+                    img = convert_from_bytes(
+                        uploaded_bytes,
                         dpi=400,
                         first_page=page_num,
                         last_page=page_num,
@@ -131,7 +132,7 @@ def upload_file():
     # ===============================
     elif ext == "docx":
         try:
-            doc = Document(filepath)
+            doc = Document(io.BytesIO(uploaded_bytes))
             for para in doc.paragraphs:
                 extracted_text += para.text + "\n"
 
@@ -155,7 +156,8 @@ def upload_file():
     # ===============================
     else:
         try:
-            img = cv2.imread(filepath)
+            img_arr = np.frombuffer(uploaded_bytes, np.uint8)
+            img = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
             if img is None:
                 return jsonify({"error": "Invalid image file"}), 400
 
