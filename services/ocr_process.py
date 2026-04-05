@@ -15,11 +15,65 @@ print("Loading TrOCR model...")
 # ===============================
 # Load TrOCR Model (Load once)
 # ===============================
-device = torch.device("cuda")  # change to "cuda" if you want & have GPU
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 processor = TrOCRProcessor.from_pretrained("microsoft/trocr-large-printed")
 model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-large-printed")
 model.to(device)
 model.eval()
+
+# Use fewer beams to reduce memory pressure during generation.
+GEN_NUM_BEAMS = 2
+
+
+def _is_cuda_oom_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "cuda" in msg and "out of memory" in msg
+
+
+def _move_model_to(target_device: torch.device) -> None:
+    global device
+    if device == target_device:
+        return
+    model.to(target_device)
+    device = target_device
+    model.eval()
+
+
+def _infer_line_text(pil_img: Image.Image) -> str:
+    """
+    Run OCR inference for one line. If CUDA runs out of memory, retry on CPU.
+    """
+    global device
+    try:
+        pixel_values = processor(images=pil_img, return_tensors="pt").pixel_values.to(device)
+        with torch.no_grad():
+            generated_ids = model.generate(
+                pixel_values,
+                max_new_tokens=256,
+                num_beams=GEN_NUM_BEAMS,
+                early_stopping=True,
+            )
+        text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+        del pixel_values, generated_ids
+        return text
+    except RuntimeError as e:
+        if device.type == "cuda" and _is_cuda_oom_error(e):
+            print("CUDA OOM during OCR line inference. Retrying on CPU.")
+            torch.cuda.empty_cache()
+            _move_model_to(torch.device("cpu"))
+
+            pixel_values = processor(images=pil_img, return_tensors="pt").pixel_values.to(device)
+            with torch.no_grad():
+                generated_ids = model.generate(
+                    pixel_values,
+                    max_new_tokens=256,
+                    num_beams=GEN_NUM_BEAMS,
+                    early_stopping=True,
+                )
+            text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+            del pixel_values, generated_ids
+            return text
+        raise
 
 
 # ===============================
@@ -263,18 +317,7 @@ def ocr_image(img_bgr: np.ndarray, filename="image", is_pdf=False) -> str:
 
         rgb = cv2.cvtColor(line_img, cv2.COLOR_GRAY2RGB)
         pil_img = Image.fromarray(rgb)
-
-        pixel_values = processor(images=pil_img, return_tensors="pt").pixel_values.to(device)
-
-        with torch.no_grad():
-            generated_ids = model.generate(
-                pixel_values,
-                max_new_tokens=256,
-                num_beams=4,
-                early_stopping=True,
-            )
-
-        text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+        text = _infer_line_text(pil_img)
 
         # Basic cleanup: ignore extremely short garbage tokens
         if len(text) <= 1:
@@ -288,5 +331,8 @@ def ocr_image(img_bgr: np.ndarray, filename="image", is_pdf=False) -> str:
     #     f.write("\n".join(line_details))
     #     f.write("\n\nFinal Extracted Text:\n")
     #     f.write("\n".join(extracted_lines))
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return "\n".join(extracted_lines)
