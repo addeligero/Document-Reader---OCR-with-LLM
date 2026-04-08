@@ -29,9 +29,12 @@ CORS(app)
 # os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ===============================
-# Poppler (Windows)
+# Poppler
 # ===============================
-POPPLER_PATH = r"C:\poppler-25.12.0\Library\bin"
+if os.name == "nt":
+    POPPLER_PATH = r"C:\poppler-25.12.0\Library\bin"
+else:
+    POPPLER_PATH = os.getenv("POPPLER_PATH")
 
 # ===============================
 # Allowed file types
@@ -88,12 +91,13 @@ def upload_file():
                         continue
 
                     # 2) Lazy rendering: render ONLY this page (because it needs OCR)
+                    poppler_kwargs = {"poppler_path": POPPLER_PATH} if POPPLER_PATH else {}
                     img = convert_from_bytes(
                         uploaded_bytes,
                         dpi=400,
                         first_page=page_num,
                         last_page=page_num,
-                        poppler_path=POPPLER_PATH
+                        **poppler_kwargs,
                     )[0]
 
                     if img.mode != "RGB":
@@ -182,4 +186,5 @@ def upload_file():
 # Run App
 # ===============================
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.getenv("PORT", "8000"))
+    app.run(host="0.0.0.0", port=port, debug=False)
