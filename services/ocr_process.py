@@ -1,11 +1,11 @@
 import os
+from threading import Lock
+
 import cv2
 import numpy as np
 from PIL import Image
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 import torch
-
-print("Loading TrOCR model...")
 # ===============================
 # OCR Process Folder
 # ===============================
@@ -13,13 +13,12 @@ print("Loading TrOCR model...")
 # os.makedirs(OCR_PROCESS_FOLDER, exist_ok=True)
 
 # ===============================
-# Load TrOCR Model (Load once)
+# Load TrOCR Model (Lazy init)
 # ===============================
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-processor = TrOCRProcessor.from_pretrained("microsoft/trocr-large-printed")
-model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-large-printed")
-model.to(device)
-model.eval()
+processor = None
+model = None
+_model_lock = Lock()
 
 # Use fewer beams to reduce memory pressure during generation.
 GEN_NUM_BEAMS = 2
@@ -30,8 +29,23 @@ def _is_cuda_oom_error(exc: Exception) -> bool:
     return "cuda" in msg and "out of memory" in msg
 
 
+def _ensure_model_loaded() -> None:
+    global processor, model
+    if model is not None and processor is not None:
+        return
+    with _model_lock:
+        if model is not None and processor is not None:
+            return
+        print("Loading TrOCR model...")
+        processor = TrOCRProcessor.from_pretrained("microsoft/trocr-large-printed")
+        model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-large-printed")
+        model.to(device)
+        model.eval()
+
+
 def _move_model_to(target_device: torch.device) -> None:
     global device
+    _ensure_model_loaded()
     if device == target_device:
         return
     model.to(target_device)
@@ -44,6 +58,7 @@ def _infer_line_text(pil_img: Image.Image) -> str:
     Run OCR inference for one line. If CUDA runs out of memory, retry on CPU.
     """
     global device
+    _ensure_model_loaded()
     try:
         pixel_values = processor(images=pil_img, return_tensors="pt").pixel_values.to(device)
         with torch.no_grad():
