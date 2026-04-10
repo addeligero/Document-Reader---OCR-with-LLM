@@ -1,9 +1,12 @@
+import io
 import os
+import time
 from threading import Lock
 
 import cv2
 import numpy as np
 from PIL import Image
+import requests
 from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 import torch
 # ===============================
@@ -11,6 +14,19 @@ import torch
 # ===============================
 # OCR_PROCESS_FOLDER = "user-ocr-process"
 # os.makedirs(OCR_PROCESS_FOLDER, exist_ok=True)
+
+# ===============================
+# OCR Runtime Config
+# ===============================
+USE_INFERENCE_API = os.getenv("OCR_USE_INFERENCE_API", "").lower() in {"1", "true", "yes"}
+HF_INFERENCE_MODEL_ID = os.getenv("HF_INFERENCE_MODEL_ID", "microsoft/trocr-base-printed")
+HF_INFERENCE_API_URL = os.getenv(
+    "HF_INFERENCE_API_URL",
+    f"https://api-inference.huggingface.co/models/{HF_INFERENCE_MODEL_ID}",
+)
+HF_INFERENCE_API_KEY = os.getenv("HF_INFERENCE_API_KEY")
+HF_INFERENCE_TIMEOUT = float(os.getenv("HF_INFERENCE_TIMEOUT", "60"))
+HF_INFERENCE_MAX_RETRIES = int(os.getenv("HF_INFERENCE_MAX_RETRIES", "2"))
 
 # ===============================
 # Load TrOCR Model (Lazy init)
@@ -37,10 +53,68 @@ def _ensure_model_loaded() -> None:
         if model is not None and processor is not None:
             return
         print("Loading TrOCR model...")
-        processor = TrOCRProcessor.from_pretrained("microsoft/trocr-large-printed")
-        model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-large-printed")
+        processor = TrOCRProcessor.from_pretrained("microsoft/trocr-base-printed")
+        model = VisionEncoderDecoderModel.from_pretrained("microsoft/trocr-base-printed")
         model.to(device)
         model.eval()
+
+
+def _infer_line_text_remote(pil_img: Image.Image) -> str:
+    if not HF_INFERENCE_API_KEY:
+        raise RuntimeError("HF_INFERENCE_API_KEY is required for OCR_USE_INFERENCE_API")
+
+    img_rgb = pil_img.convert("RGB")
+    buffer = io.BytesIO()
+    img_rgb.save(buffer, format="PNG")
+    img_bytes = buffer.getvalue()
+
+    headers = {"Authorization": f"Bearer {HF_INFERENCE_API_KEY}"}
+
+    last_error = None
+    for attempt in range(HF_INFERENCE_MAX_RETRIES + 1):
+        try:
+            response = requests.post(
+                HF_INFERENCE_API_URL,
+                headers=headers,
+                data=img_bytes,
+                timeout=HF_INFERENCE_TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            last_error = exc
+            continue
+
+        if response.status_code == 503 and attempt < HF_INFERENCE_MAX_RETRIES:
+            try:
+                payload = response.json()
+                wait_seconds = float(payload.get("estimated_time", 2))
+            except (ValueError, TypeError):
+                wait_seconds = 2
+            time.sleep(min(wait_seconds, 10))
+            continue
+
+        if not response.ok:
+            raise RuntimeError(
+                f"Inference API error {response.status_code}: {response.text[:200]}"
+            )
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise RuntimeError("Inference API returned invalid JSON") from exc
+
+        if isinstance(payload, list) and payload:
+            return str(payload[0].get("generated_text", "")).strip()
+        if isinstance(payload, dict):
+            if "generated_text" in payload:
+                return str(payload.get("generated_text", "")).strip()
+            if "text" in payload:
+                return str(payload.get("text", "")).strip()
+            if "error" in payload:
+                raise RuntimeError(str(payload.get("error")))
+
+        return ""
+
+    raise RuntimeError(f"Inference API request failed: {last_error}")
 
 
 def _move_model_to(target_device: torch.device) -> None:
@@ -58,6 +132,8 @@ def _infer_line_text(pil_img: Image.Image) -> str:
     Run OCR inference for one line. If CUDA runs out of memory, retry on CPU.
     """
     global device
+    if USE_INFERENCE_API:
+        return _infer_line_text_remote(pil_img)
     _ensure_model_loaded()
     try:
         pixel_values = processor(images=pil_img, return_tensors="pt").pixel_values.to(device)
