@@ -17,7 +17,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from docx import Document
 from services.ocr_process import ocr_image
-from services.llm_process import classify_document
+from services.classifier_process import classify_document
 
 # ===============================
 # Initialize Flask
