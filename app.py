@@ -126,6 +126,7 @@ def upload_file():
 
             # Pipeline: SVM (candidate mapping) → LLaMA (final category + tags)
             svm_candidates = svm_classify(full_text)
+            print("SVM candidates for DOCX:", svm_candidates)
             llm_result = classify_document(full_text, svm_candidates)
 
             return jsonify({
@@ -151,6 +152,7 @@ def upload_file():
 
             # Pipeline: SVM (candidate mapping) → LLaMA (final category + tags)
             svm_candidates = svm_classify(extracted_text)
+            print("SVM candidates for DOCX:", svm_candidates)
             llm_result = classify_document(extracted_text, svm_candidates)
 
             return jsonify({
@@ -180,6 +182,7 @@ def upload_file():
 
             # Pipeline: SVM (candidate mapping) → LLaMA (final category + tags)
             svm_candidates = svm_classify(extracted_text)
+            print("SVM candidates for DOCX:", svm_candidates)
             llm_result = classify_document(extracted_text, svm_candidates)
 
             return jsonify({

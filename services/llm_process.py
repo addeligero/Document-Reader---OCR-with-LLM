@@ -86,6 +86,8 @@ Use these SVM predictions as a strong guide, but you MAY override them if the
 document text clearly belongs to a different category.
 """
 
+    print("SVM Hint:\n", svm_hint if svm_hint else "(no SVM candidates)")
+
     prompt = f"""You are a document classification assistant for a Quality Assurance Management System (QuAMS).
 
 Below is the extracted text of a document from OCR:

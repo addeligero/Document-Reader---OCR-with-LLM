@@ -90,7 +90,6 @@ def train(csv_path: str, n_topics: int = 30):
         random_state=42,
     )
     svm.fit(X_combined, labels)
-
     # ── quick cross-val report ──
     scores = cross_val_score(svm, X_combined, labels, cv=min(5, len(df)), scoring="accuracy")
     print(f"Cross-val accuracy: {scores.mean():.3f} (+/- {scores.std():.3f})")
