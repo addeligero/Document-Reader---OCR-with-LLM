@@ -1,6 +1,7 @@
-venv
-uploads
-process
-user-ocr-process
+venv/
+uploads/
+process/
+user-ocr-process/
 .env*
-services/_pycache_
+__pycache__/
+*.pyc

@@ -100,13 +100,13 @@ class DocumentClassifier:
     def _load_models(self):
         """Load TF-IDF vectorizer, NMF model, and SVM pipeline from joblib files."""
         tfidf_path = (
-            self.models_dir / "nmf_models" / "nmf_default_run_003" / "tfidf_vec.joblib"
+            self.models_dir  / "tfidf_vec.joblib"
         )
         nmf_path = (
-            self.models_dir / "nmf_models" / "nmf_default_run_003" / "nmf_model.joblib"
+            self.models_dir  / "nmf_model.joblib"
         )
         svm_path = (
-            self.models_dir / "svm_models" / "nmf_svm_run_004" / "svm_pipeline.joblib"
+            self.models_dir  / "svm_pipeline.joblib"
         )
 
         if not tfidf_path.exists():
