@@ -62,13 +62,48 @@ def _preprocess(text: str) -> str:
 
 
 # ── load persisted models at import time (once) ──
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+MODELS_DIR = os.path.join(BASE_DIR, "models")
 
-_tfidf: TfidfVectorizer = joblib.load(os.path.join(MODEL_DIR, "tfidf_vec.joblib"))
-_nmf: NMF = joblib.load(os.path.join(MODEL_DIR, "nmf_model.joblib"))
-_svm: SVC = joblib.load(os.path.join(MODEL_DIR, "svm_pipeline.joblib"))
+_TFIDF_PATHS = [
+    os.path.join(MODELS_DIR, "nmf_models", "nmf_default_run_003", "tfidf_vec.joblib"),
+    os.path.join(MODELS_DIR, "tfidf_vec.joblib"),
+]
+_NMF_PATHS = [
+    os.path.join(MODELS_DIR, "nmf_models", "nmf_default_run_003", "nmf_model.joblib"),
+    os.path.join(MODELS_DIR, "nmf_model.joblib"),
+]
+_SVM_PATHS = [
+    os.path.join(MODELS_DIR, "svm_models", "nmf_svm_run_004", "svm_pipeline.joblib"),
+    os.path.join(MODELS_DIR, "svm_pipeline.joblib"),
+]
+
+
+def _pick_existing(paths: list[str]) -> str:
+    for path in paths:
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(f"Model file not found. Tried: {', '.join(paths)}")
+
+
+_TFIDF_PATH = _pick_existing(_TFIDF_PATHS)
+_NMF_PATH = _pick_existing(_NMF_PATHS)
+_SVM_PATH = _pick_existing(_SVM_PATHS)
+
+_tfidf: TfidfVectorizer = joblib.load(_TFIDF_PATH)
+_nmf: NMF = joblib.load(_NMF_PATH)
+_svm: SVC = joblib.load(_SVM_PATH)
+
+if hasattr(_nmf, "components_") and np.allclose(_nmf.components_, 0):
+    print("Warning: NMF components are all zeros. Check the nmf_model.joblib file.")
 
 print("Hybrid NMF+SVM classifier loaded.")
+
+
+def _pipeline_has_step(model, step_type) -> bool:
+    if not hasattr(model, "named_steps"):
+        return False
+    return any(isinstance(step, step_type) for step in model.named_steps.values())
 
 
 def svm_classify(text: str, top_n: int = 5) -> list[dict]:
@@ -84,14 +119,30 @@ def svm_classify(text: str, top_n: int = 5) -> list[dict]:
         if not processed:
             return []
 
-        X_tfidf = _tfidf.transform([processed])
-        if X_tfidf.nnz == 0:
-            print("svm_classify: no vocabulary overlap with training data.")
-            return []
+        if _pipeline_has_step(_svm, TfidfVectorizer):
+            scores = _svm.decision_function([processed])[0]
+            classes = _svm.classes_
+        else:
+            X_tfidf = _tfidf.transform([processed])
+            if X_tfidf.nnz == 0:
+                print("svm_classify: no vocabulary overlap with training data.")
+                return []
 
-        X_nmf = _nmf.transform(X_tfidf)              # shape (1, 40) — SVM's actual input
-        scores = _svm.decision_function(X_nmf)[0]    # shape (n_classes,)
-        classes = _svm.classes_
+            if _pipeline_has_step(_svm, NMF):
+                X_features = X_tfidf
+            else:
+                try:
+                    X_features = _nmf.transform(X_tfidf)  # shape (1, n_topics)
+                except ValueError as exc:
+                    print(f"svm_classify: NMF transform failed: {exc}")
+                    expected = getattr(_svm, "n_features_in_", None)
+                    if expected == X_tfidf.shape[1]:
+                        X_features = X_tfidf
+                    else:
+                        return []
+
+            scores = _svm.decision_function(X_features)[0]
+            classes = _svm.classes_
 
         # Normalize decision-function scores to [0, 1] via softmax so they read as confidences
         exp = np.exp(scores - scores.max())
@@ -105,4 +156,7 @@ def svm_classify(text: str, top_n: int = 5) -> list[dict]:
 
     except Exception as e:
         print("svm_classify error:", e)
+        import traceback
+
+        traceback.print_exc()
         return []
