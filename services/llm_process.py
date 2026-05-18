@@ -50,30 +50,60 @@ def call_llm(prompt: str):
         }
 
 
-def classify_document(text: str) -> dict:
+def classify_document(text: str, svm_candidates: list[dict] | None = None) -> dict:
     """
-    Send extracted document text to the LLM.
+    Send extracted document text + SVM candidate categories to the LLM
+    for final classification and tagging.
+
+    Parameters:
+      text            – OCR-extracted document text
+      svm_candidates  – ranked list from svm_classify(), e.g.
+                        [{"category": "Research", "confidence": 0.42}, ...]
+
     Returns:
       {
-        "primary_category":   str,   # most confident match
-        "secondary_category": str,   # semi-confident match
+        "primary_category":   str,
+        "secondary_category": str,
         "tags":               list[str]
       }
     On failure returns the error dict from call_llm.
     """
     categories_list = "\n".join(f"- {c}" for c in CATEGORIES)
 
+    # Build the SVM hint section
+    svm_hint = ""
+    if svm_candidates:
+        ranked = "\n".join(
+            f"  {i+1}. {c['category']} (confidence: {c['confidence']:.2%})"
+            for i, c in enumerate(svm_candidates)
+        )
+        svm_hint = f"""
+An SVM classifier has pre-analysed this document and ranked these as the most
+likely categories (in order of confidence):
+{ranked}
+
+Use these SVM predictions as a strong guide, but you MAY override them if the
+document text clearly belongs to a different category.
+Soft guidance rules:
+- If top-1 confidence >= 0.60, choose it as PRIMARY unless the text strongly contradicts it.
+- If (top-1 - top-2) >= 0.15, choose top-1 as PRIMARY.
+- Otherwise, choose PRIMARY and SECONDARY from the top-3 SVM candidates based on the text.
+- Only choose outside the SVM top-3 if the document text clearly indicates a different category.
+"""
+
     prompt = f"""You are a document classification assistant for a Quality Assurance Management System (QuAMS).
 
-Below is the extracted text of a document from ocr:
+Below is the extracted text of a document from OCR:
 \"\"\"
 {text[:4000]}
+
 \"\"\"
+{svm_hint}
 
 Your task:
 1. Choose the PRIMARY category (the one you are MOST confident about).
 2. Choose the SECONDARY category (the next best match, semi-confident).
-3. Generate a list of short, relevant tags that describe the document content 
+3. Generate a list of short, relevant tags that describe the document content
    (e.g. "framework", "research design", "outreach", "quarterly report").
    Aim for 3-5 tags.
 

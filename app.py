@@ -17,6 +17,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from docx import Document
 from services.ocr_process import ocr_image
+from services.classifier_process import svm_classify
 from services.llm_process import classify_document
 
 # ===============================
@@ -122,7 +123,11 @@ def upload_file():
                     )
 
             full_text = "\n".join(final_text_parts)
-            llm_result = classify_document(full_text)
+
+            # Pipeline: SVM (candidate mapping) → LLaMA (final category + tags)
+            svm_candidates = svm_classify(full_text)
+            print("SVM candidates for DOCX:", svm_candidates)
+            llm_result = classify_document(full_text, svm_candidates)
 
             return jsonify({
                 "filename": filename,
@@ -145,7 +150,10 @@ def upload_file():
             for para in doc.paragraphs:
                 extracted_text += para.text + "\n"
 
-            llm_result = classify_document(extracted_text)
+            # Pipeline: SVM (candidate mapping) → LLaMA (final category + tags)
+            svm_candidates = svm_classify(extracted_text)
+            print("SVM candidates for DOCX:", svm_candidates)
+            llm_result = classify_document(extracted_text, svm_candidates)
 
             return jsonify({
                 "filename": filename,
@@ -171,7 +179,11 @@ def upload_file():
                 return jsonify({"error": "Invalid image file"}), 400
 
             extracted_text = ocr_image(img, filename, is_pdf=False)
-            llm_result = classify_document(extracted_text)
+
+            # Pipeline: SVM (candidate mapping) → LLaMA (final category + tags)
+            svm_candidates = svm_classify(extracted_text)
+            print("SVM candidates for DOCX:", svm_candidates)
+            llm_result = classify_document(extracted_text, svm_candidates)
 
             return jsonify({
                 "filename": filename,
