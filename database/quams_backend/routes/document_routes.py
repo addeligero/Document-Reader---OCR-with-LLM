@@ -129,4 +129,5 @@ def download_document(user: User, doc_id: str):
     full_path = current_app.config["UPLOAD_DIR"] / doc.path
     if not full_path.exists():
         return jsonify({"error": "File missing"}), 404
-    return send_file(full_path, as_attachment=True, download_name=doc.file_name)
+    inline = request.args.get("inline") in {"1", "true", "yes"}
+    return send_file(full_path, as_attachment=not inline, download_name=doc.file_name)

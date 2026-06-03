@@ -29,11 +29,17 @@ def decode_token(token: str) -> dict:
 
 def current_user() -> User | None:
     auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    token = ""
+    if auth_header.startswith("Bearer "):
+        token = auth_header.removeprefix("Bearer ").strip()
+    elif request.args.get("token"):
+        token = request.args.get("token", "").strip()
+
+    if not token:
         return None
 
     try:
-        payload = decode_token(auth_header.removeprefix("Bearer ").strip())
+        payload = decode_token(token)
     except jwt.PyJWTError:
         return None
 
