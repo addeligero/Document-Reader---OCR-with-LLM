@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from textwrap import wrap
 
-from flask import Blueprint, current_app, jsonify, request, send_file
+from flask import Blueprint, Response, current_app, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 from ..auth import login_required
@@ -20,6 +25,135 @@ documents_bp = Blueprint("documents", __name__, url_prefix="/api/documents")
 
 def can_edit_document(user: User, doc: Document) -> bool:
     return doc.user_id == user.id or user.role in PRIVILEGED_DOCUMENT_ROLES
+
+
+def pdf_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def build_text_preview_pdf(title: str, text: str | None) -> bytes:
+    lines = [title, ""]
+    for raw_line in (text or "No extracted text available.").splitlines():
+        wrapped = wrap(raw_line, width=92) or [""]
+        lines.extend(wrapped)
+
+    lines_per_page = 48
+    pages = [lines[i : i + lines_per_page] for i in range(0, len(lines), lines_per_page)] or [[]]
+    objects: list[bytes] = []
+
+    def add_object(content: bytes) -> int:
+        objects.append(content)
+        return len(objects)
+
+    page_refs = []
+    font_ref = add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
+    for page_lines in pages:
+        stream_lines = ["BT", "/F1 10 Tf", "72 760 Td", "14 TL"]
+        for index, line in enumerate(page_lines):
+            safe = pdf_escape(line).encode("cp1252", errors="replace").decode("cp1252")
+            if index:
+                stream_lines.append("T*")
+            stream_lines.append(f"({safe}) Tj")
+        stream_lines.append("ET")
+        stream = "\n".join(stream_lines).encode("cp1252", errors="replace")
+        content_ref = add_object(
+            b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream"
+        )
+        page_refs.append(
+            add_object(
+                (
+                    f"<< /Type /Page /Parent 0 0 R /MediaBox [0 0 612 792] "
+                    f"/Resources << /Font << /F1 {font_ref} 0 R >> >> "
+                    f"/Contents {content_ref} 0 R >>"
+                ).encode()
+            )
+        )
+
+    pages_ref = add_object(
+        (
+            f"<< /Type /Pages /Count {len(page_refs)} /Kids "
+            f"[{' '.join(f'{ref} 0 R' for ref in page_refs)}] >>"
+        ).encode()
+    )
+    catalog_ref = add_object(f"<< /Type /Catalog /Pages {pages_ref} 0 R >>".encode())
+
+    for ref in page_refs:
+        objects[ref - 1] = objects[ref - 1].replace(b"/Parent 0 0 R", f"/Parent {pages_ref} 0 R".encode())
+
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, content in enumerate(objects, start=1):
+        offsets.append(len(output))
+        output.extend(f"{index} 0 obj\n".encode())
+        output.extend(content)
+        output.extend(b"\nendobj\n")
+
+    xref_offset = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode())
+    output.extend(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root {catalog_ref} 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode()
+    )
+    return bytes(output)
+
+
+def find_libreoffice_executable() -> str | None:
+    candidates = [
+        os.getenv("LIBREOFFICE_PATH"),
+        shutil.which("soffice"),
+        shutil.which("libreoffice"),
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return str(candidate)
+    return None
+
+
+def convert_office_document_to_pdf(file_path: Path) -> bytes | None:
+    libreoffice = find_libreoffice_executable()
+    if not libreoffice:
+        return None
+
+    with tempfile.TemporaryDirectory(prefix="quams-preview-") as temp_dir:
+        output_dir = Path(temp_dir)
+        result = subprocess.run(
+            [
+                libreoffice,
+                "--headless",
+                "--nologo",
+                "--nofirststartwizard",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                str(output_dir),
+                str(file_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+        if result.returncode != 0:
+            current_app.logger.warning("LibreOffice conversion failed: %s", result.stderr or result.stdout)
+            return None
+
+        converted = output_dir / f"{file_path.stem}.pdf"
+        if not converted.exists():
+            matches = list(output_dir.glob("*.pdf"))
+            converted = matches[0] if matches else converted
+        if not converted.exists():
+            current_app.logger.warning("LibreOffice conversion did not produce a PDF for %s", file_path)
+            return None
+
+        return converted.read_bytes()
 
 
 def add_notification(
@@ -225,3 +359,24 @@ def download_document(user: User, doc_id: str):
         return jsonify({"error": "File missing"}), 404
     inline = request.args.get("inline") in {"1", "true", "yes"}
     return send_file(full_path, as_attachment=not inline, download_name=doc.file_name)
+
+
+@documents_bp.get("/<doc_id>/preview-pdf")
+@login_required
+def preview_document_pdf(user: User, doc_id: str):
+    doc = db.session.get(Document, doc_id)
+    if not doc:
+        return jsonify({"error": "Document not found"}), 404
+
+    full_path = current_app.config["UPLOAD_DIR"] / doc.path
+    pdf_bytes = None
+    if full_path.exists() and full_path.suffix.lower() in {".doc", ".docx", ".rtf"}:
+        pdf_bytes = convert_office_document_to_pdf(full_path)
+    if pdf_bytes is None:
+        pdf_bytes = build_text_preview_pdf(doc.file_name, doc.extracted_text)
+
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{Path(doc.file_name).stem}-preview.pdf"'},
+    )
