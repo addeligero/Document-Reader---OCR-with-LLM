@@ -84,6 +84,16 @@ def mark_read(user: User, notification_id: str):
     return jsonify(notification_json(notification))
 
 
+@notifications_bp.patch("/read-all")
+@login_required
+def mark_all_read(user: User):
+    rows = Notification.query.filter_by(user_id=user.id, read=False).all()
+    for notification in rows:
+        notification.read = True
+    db.session.commit()
+    return jsonify({"ok": True, "updated_count": len(rows)})
+
+
 @notifications_bp.delete("/<notification_id>")
 @login_required
 def delete_notification(user: User, notification_id: str):
