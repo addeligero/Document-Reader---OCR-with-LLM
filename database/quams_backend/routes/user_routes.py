@@ -73,15 +73,29 @@ def create_user(user: User):
 @users_bp.patch("/<user_id>")
 @login_required
 def update_user(user: User, user_id: str):
-    blocked = require_user_admin(user)
-    if blocked:
-        return blocked
-
     target = db.session.get(User, user_id)
     if not target:
         return jsonify({"error": "User not found"}), 404
 
     payload = request.get_json(force=True)
+    if user.id == target.id:
+        allowed_self_fields = {"f_name", "l_name", "avatar"}
+        disallowed_fields = set(payload) - allowed_self_fields
+        if disallowed_fields:
+            return jsonify({"error": "Forbidden"}), 403
+
+        for field in allowed_self_fields:
+            if field in payload:
+                setattr(target, field, payload[field])
+
+        target.updated_at = datetime.now(timezone.utc)
+        db.session.commit()
+        return jsonify(user_json(target))
+
+    blocked = require_user_admin(user)
+    if blocked:
+        return blocked
+
     if "username" in payload:
         username = str(payload.get("username", "")).strip().lower()
         if not username:

@@ -23,7 +23,7 @@ class User(db.Model):
     department = db.Column(db.String(120), nullable=True)
     status = db.Column(db.Boolean, nullable=False, default=True)
     is_taskforce = db.Column(db.Boolean, nullable=False, default=False)
-    avatar = db.Column(db.String(500), nullable=True)
+    avatar = db.Column(db.Text, nullable=True)
     mfa_secret = db.Column(db.String(64), nullable=True)
     mfa_enabled = db.Column(db.Boolean, nullable=False, default=False)
     last_sign_in_at = db.Column(db.DateTime(timezone=True), nullable=True)
