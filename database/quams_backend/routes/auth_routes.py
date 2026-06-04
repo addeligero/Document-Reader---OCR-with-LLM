@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pyotp
 from flask import Blueprint, jsonify, request
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..auth import issue_token, login_required
 from ..constants import PRIVILEGED_MFA_ROLES
@@ -68,4 +68,18 @@ def me(user: User):
 @auth_bp.post("/logout")
 @login_required
 def logout(user: User):
+    return jsonify({"ok": True})
+
+
+@auth_bp.post("/change-password")
+@login_required
+def change_password(user: User):
+    payload = request.get_json(force=True)
+    password = str(payload.get("password", "")).strip()
+    if not password:
+        return jsonify({"error": "password is required"}), 400
+
+    user.password_hash = generate_password_hash(password)
+    user.updated_at = datetime.now(timezone.utc)
+    db.session.commit()
     return jsonify({"ok": True})
