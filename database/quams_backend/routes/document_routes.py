@@ -187,7 +187,7 @@ def notify_reviewers_pending_document(doc: Document) -> None:
             "New document pending review",
             f'"{doc.file_name}" is ready for checking.',
             "info",
-            "/classification",
+            "/dashboard/classification",
             {"document_id": doc.id, "status": doc.status},
         )
 
@@ -207,7 +207,7 @@ def notify_document_status_change(actor: User, doc: Document, previous_status: s
         title,
         message,
         notification_type,
-        "/classification",
+        "/dashboard/classification",
         {"document_id": doc.id, "status": doc.status},
     )
 
@@ -251,7 +251,7 @@ def upload_document(user: User):
         "Document uploaded",
         f'"{original_name}" was uploaded and is now being processed for checking.',
         "info",
-        "/upload",
+        "/dashboard/upload",
         {"document_id": doc.id, "status": doc.status},
     )
     db.session.commit()
@@ -270,7 +270,7 @@ def upload_document(user: User):
                     "Document upload failed",
                     f'"{doc.file_name}" has duplicate extracted text and cannot proceed to checking.',
                     "error",
-                    "/upload",
+                    "/dashboard/upload",
                     {"document_id": doc.id, "status": doc.status},
                 )
                 db.session.commit()
@@ -288,7 +288,7 @@ def upload_document(user: User):
             "Document ready for checking",
             f'"{doc.file_name}" was processed successfully and is now pending review.',
             "success",
-            "/upload",
+            "/dashboard/upload",
             {"document_id": doc.id, "status": doc.status},
         )
         notify_reviewers_pending_document(doc)
@@ -301,7 +301,7 @@ def upload_document(user: User):
             "Document processing failed",
             f'"{doc.file_name}" failed during OCR/classification.',
             "error",
-            "/upload",
+            "/dashboard/upload",
             {"document_id": doc.id, "status": doc.status},
         )
         db.session.commit()
