@@ -2,6 +2,7 @@ venv/
 uploads/
 process/
 user-ocr-process/
+instance/
 .env*
 __pycache__/
 *.pyc
